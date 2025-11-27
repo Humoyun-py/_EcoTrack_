@@ -461,5 +461,80 @@
             };
         });
     });
+    function toggleItem(itemId, itemName) {
+    const itemElement = document.querySelector(`.inventory-item[onclick="toggleItem('${itemId}', '${itemName}')"]`);
+    const isEquipped = itemElement.classList.contains('border-success');
+    
+    if (isEquipped) {
+        // Echiq
+        if (confirm(`"${itemName}" ni echmoqchimisiz?`)) {
+            unequipItem(itemId);
+        }
+    } else {
+        // Kiyish
+        if (confirm(`"${itemName}" ni kimoqchimisiz?`)) {
+            equipItem(itemId);
+        }
+    }
+}
+
+function equipItem(itemId) {
+    fetch(`/equip_item/${itemId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload(); // Sahifani yangilash
+        } else {
+            alert('Xatolik: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Xatolik:', error);
+        alert('Server xatosi!');
+    });
+}
+
+function unequipItem(itemId) {
+    fetch(`/unequip_item/${itemId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload(); // Sahifani yangilash
+        } else {
+            alert('Xatolik: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Xatolik:', error);
+        alert('Server xatosi!');
+    });
+}
+
+// Sahifa yuklanganda animatsiya
+document.addEventListener('DOMContentLoaded', function() {
+    const heroContainer = document.querySelector('.hero-container');
+    if (heroContainer) {
+        heroContainer.style.opacity = '0';
+        heroContainer.style.transform = 'translateY(20px)';
+        
+        setTimeout(() => {
+            heroContainer.style.transition = 'all 0.5s ease';
+            heroContainer.style.opacity = '1';
+            heroContainer.style.transform = 'translateY(0)';
+        }, 100);
+    }
+});
 </script>
 {% endblock %}

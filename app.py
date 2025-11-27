@@ -130,6 +130,7 @@ class QuizResult(db.Model):
     coins_earned = db.Column(db.Integer, nullable=False)
     completed_at = db.Column(db.DateTime, default=datetime.utcnow)
     task_id = db.Column(db.Integer, db.ForeignKey('task.id'), nullable=True)
+    difficulty = db.Column(db.String(20), default='medium')
     user = db.relationship('User', backref='quiz_results')
     task = db.relationship('Task', backref='quiz_results')
 
@@ -160,7 +161,9 @@ class UserAchievement(db.Model):
     title = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
     earned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user = db.relationship('User', backref='achievements')
 
+# Agar Notification modeli yo'q bo'lsa, app.py ga qo'shing
 class Notification(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -175,9 +178,26 @@ class Notification(db.Model):
 def load_user(user_id):
     return db.session.get(User, int(user_id))
 
+def init_database():
+    with app.app_context():
+        try:
+            db.drop_all()
+            db.create_all()
+            create_demo_data()
+            print("✅ Database yangilandi!")
+            
+            create_daily_tasks()
+            
+        except Exception as e:
+            print(f"❌ Database yangilashda xatolik: {e}")
+            db.create_all()
+            create_demo_data()
+            print("✅ Database yaratildi!")
+            create_daily_tasks()
+
 def create_demo_data():
-    # Asosiy topshiriqlar
     demo_tasks = [
+        # Kunlik topshiriqlar
         Task(title="Suv tejash", description="Bugun dush vaqtingizni 5 daqiqaga kamaytiring", reward_coins=15, energy_cost=8, difficulty="easy", quiz_required=False, daily_reset=True, task_type="daily", category="water"),
         Task(title="Energiya tejash", description="1 soat davomida keraksiz qurilmalarni o'chiring", reward_coins=20, energy_cost=10, difficulty="easy", quiz_required=False, daily_reset=True, task_type="daily", category="energy"),
         Task(title="Plastikni qayta ishlash", description="3 ta plastik idishni qayta ishlash uchun ajrating", reward_coins=25, energy_cost=12, difficulty="medium", quiz_required=False, daily_reset=True, task_type="daily", category="recycling"),
@@ -222,7 +242,6 @@ def create_demo_data():
         User(username='eco_katta', email='katta@ecoverse.com', password_hash=generate_password_hash('katta123'), role='adult', coins=80),
     ]
     
-    # Demo yangiliklar
     demo_news = [
         News(
             title="EcoVerse yangi kunlik topshiriqlar bilan yangilandi!",
@@ -240,7 +259,6 @@ def create_demo_data():
         ),
     ]
     
-    # Demo e'lonlar
     demo_announcements = [
         Announcement(
             title="Tizim yangilanishi",
@@ -276,20 +294,16 @@ def create_demo_data():
     db.session.commit()
 
 def create_daily_tasks():
-    """Har kuni yangi topshiriqlar yaratish"""
     today = datetime.utcnow().date()
     
-    # Bugun uchun topshiriqlar mavjudligini tekshirish
     existing_daily = DailyTask.query.filter_by(date=today).first()
     if existing_daily:
         return existing_daily
     
-    # Kunlik topshiriqlarni olish
     daily_tasks = Task.query.filter_by(task_type='daily', is_active=True).all()
     quiz_tasks = Task.query.filter_by(task_type='quiz', is_active=True).all()
     
     if len(daily_tasks) >= 3 and len(quiz_tasks) >= 1:
-        # Tasodifiy kunlik topshiriqlar tanlash
         selected_daily = random.sample(daily_tasks, 3)
         selected_quiz = random.choice(quiz_tasks)
         
@@ -309,7 +323,6 @@ def create_daily_tasks():
     return None
 
 def get_todays_tasks():
-    """Bugungi kunlik topshiriqlarni olish"""
     today = datetime.utcnow().date()
     daily_task = DailyTask.query.filter_by(date=today).first()
     
@@ -323,7 +336,6 @@ def get_todays_tasks():
         }
     return None
 
-# ML SAVOLLARNI JSON FAYLDAN O'QISH
 def load_questions_from_json():
     try:
         with open('ml_questions.json', 'r', encoding='utf-8') as f:
@@ -390,20 +402,15 @@ def create_demo_questions():
         ]
     }
 
-# KUNLIK YANGILANISH FUNKSIYASI
 def daily_reset_system():
-    """Har kuni tungi soat 00:00 da bajariladigan yangilanish"""
     with app.app_context():
         today = datetime.utcnow().date()
         print(f"🔄 Kunlik yangilanish boshlandi: {today}")
         
-        # Yangi kunlik topshiriqlar yaratish
         create_daily_tasks()
         
-        # Barcha foydalanuvchilarning kunlik progressini yangilash
         users = User.query.all()
         for user in users:
-            # Kunlik progress yaratish
             daily_progress = DailyProgress(
                 user_id=user.id,
                 date=today,
@@ -413,7 +420,6 @@ def daily_reset_system():
             )
             db.session.add(daily_progress)
             
-            # Energiyani to'ldirish (har kuni 50 energiya)
             user.energy = min(100, user.energy + 50)
             user.last_daily_reset = datetime.utcnow()
         
@@ -421,19 +427,274 @@ def daily_reset_system():
         print(f"✅ Kunlik yangilanish bajarildi: {today}")
 
 def start_daily_scheduler():
-    """Kunlik yangilanish scheduler'ini ishga tushirish"""
     def scheduler():
         while True:
             now = datetime.utcnow()
-            # Har kuni soat 00:00 da yangilash
             if now.hour == 0 and now.minute == 0:
                 daily_reset_system()
-                time.sleep(60)  # Keyingi minutgacha kutish
-            time.sleep(30)  # 30 soniyada bir tekshirish
+                time.sleep(60)
+            time.sleep(30)
     
     thread = threading.Thread(target=scheduler, daemon=True)
     thread.start()
     print("🕒 Kunlik yangilanish scheduler'i ishga tushdi")
+
+def check_level_up(user):
+    required_exp = user.level * 100
+    if user.experience >= required_exp:
+        user.level += 1
+        user.experience = 0
+        user.coins += user.level * 50
+        return True
+    return False
+
+def reset_daily_tasks(user_id):
+    today = datetime.utcnow().date()
+    
+    todays_tasks = get_todays_tasks()
+    if todays_tasks:
+        daily_task_ids = [task.id for task in todays_tasks['daily_tasks']] + [todays_tasks['daily_quiz'].id]
+        
+        for task_id in daily_task_ids:
+            user_task = UserTask.query.filter_by(user_id=user_id, task_id=task_id).first()
+            if user_task:
+                if user_task.completed_at and user_task.completed_at.date() != today:
+                    user_task.completed = False
+                    user_task.completed_at = None
+            else:
+                new_user_task = UserTask(user_id=user_id, task_id=task_id)
+                db.session.add(new_user_task)
+    
+    db.session.commit()
+
+# YANGI: TOPSHIRIQ VA DO'KON FUNKSIYALARI
+@app.route('/complete_task/<int:task_id>', methods=['POST'])
+@login_required
+def complete_task(task_id):
+    """Topshiriqni bajarilgan deb belgilash"""
+    try:
+        task = Task.query.get_or_404(task_id)
+        
+        # Energiya tekshirish
+        if current_user.energy < task.energy_cost:
+            return jsonify({'success': False, 'error': f'Energiya yetarli emas! Kerak: {task.energy_cost}, Sizda: {current_user.energy}'})
+        
+        # Topshiriq allaqachon bajarilganligini tekshirish
+        user_task = UserTask.query.filter_by(
+            user_id=current_user.id, 
+            task_id=task_id
+        ).first()
+        
+        if user_task and user_task.completed:
+            return jsonify({'success': False, 'error': 'Bu topshiriq allaqachon bajarilgan!'})
+        
+        # Energiya olib tashlash
+        current_user.energy -= task.energy_cost
+        
+        # Coinlarni qo'shish
+        current_user.coins += task.reward_coins
+        
+        # Tajriba qo'shish
+        exp_gained = task.reward_coins // 2
+        current_user.experience += exp_gained
+        
+        # Daraja yangilash
+        while current_user.experience >= current_user.level * 100:
+            current_user.experience -= current_user.level * 100
+            current_user.level += 1
+        
+        # Topshiriqni bajarilgan deb belgilash
+        if user_task:
+            user_task.completed = True
+            user_task.completed_at = datetime.utcnow()
+        else:
+            new_user_task = UserTask(
+                user_id=current_user.id,
+                task_id=task_id,
+                completed=True,
+                completed_at=datetime.utcnow()
+            )
+            db.session.add(new_user_task)
+        
+        # Kunlik progressni yangilash
+        today = datetime.utcnow().date()
+        daily_progress = DailyProgress.query.filter_by(
+            user_id=current_user.id, 
+            date=today
+        ).first()
+        
+        if daily_progress:
+            daily_progress.tasks_completed += 1
+            daily_progress.coins_earned += task.reward_coins
+        else:
+            new_daily_progress = DailyProgress(
+                user_id=current_user.id,
+                date=today,
+                tasks_completed=1,
+                quizzes_completed=0,
+                coins_earned=task.reward_coins
+            )
+            db.session.add(new_daily_progress)
+        
+        # Notification yaratish
+        notification = Notification(
+            user_id=current_user.id,
+            title='✅ Topshiriq Bajarildi!',
+            message=f'"{task.title}" topshirig\'i bajarildi! +{task.reward_coins} coin, +{exp_gained} tajriba',
+            notification_type='task',
+            is_read=False
+        )
+        db.session.add(notification)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Topshiriq bajarildi! +{task.reward_coins} coin, +{exp_gained} tajriba',
+            'new_coins': current_user.coins,
+            'new_energy': current_user.energy,
+            'new_level': current_user.level,
+            'new_experience': current_user.experience
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)})
+
+# app.py ga quyidagi funksiyalarni qo'shing
+# app.py ga quyidagi route'larni qo'shing yoki yangilang
+
+@app.route('/buy_energy', methods=['POST'])
+@login_required
+def buy_energy():
+    """Energiya sotib olish - YANGILANGAN VERSIYA"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Ma\'lumotlar yetarli emas!'})
+        
+        energy_amount = data.get('energy', 0)
+        price = data.get('price', 0)
+        
+        if not energy_amount or not price:
+            return jsonify({'success': False, 'error': 'Energiya miqdori yoki narx ko\'rsatilmagan!'})
+        
+        # Coinlarni tekshirish
+        if current_user.coins < price:
+            return jsonify({'success': False, 'error': f'Coin yetarli emas! Sizda {current_user.coins} coin bor, kerak: {price}'})
+        
+        # Coinlarni olib tashlash
+        current_user.coins -= price
+        
+        # Energiyani qo'shish (maksimum 100)
+        new_energy = min(100, current_user.energy + energy_amount)
+        current_user.energy = new_energy
+        
+        # Notification yaratish
+        notification = Notification(
+            user_id=current_user.id,
+            title='⚡ Energiya to\'ldirildi!',
+            message=f'Siz {energy_amount} energiya sotib oldingiz! -{price} coin',
+            notification_type='energy',
+            is_read=False
+        )
+        db.session.add(notification)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'{energy_amount} energiya muvaffaqiyatli sotib olindi!',
+            'new_coins': current_user.coins,
+            'new_energy': current_user.energy
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Xatolik buy_energy da: {str(e)}")
+        return jsonify({'success': False, 'error': f'Server xatosi: {str(e)}'})
+
+@app.route('/buy_item/<int:item_id>', methods=['POST'])
+@login_required
+def buy_item(item_id):
+    """Mahsulot sotib olish - YANGILANGAN VERSIYA"""
+    try:
+        item = Item.query.get_or_404(item_id)
+        
+        # Mahsulot faol emasligini tekshirish
+        if not item.is_active:
+            return jsonify({'success': False, 'error': 'Bu mahsulot hozir mavjud emas!'})
+        
+        # Coinlarni tekshirish
+        if current_user.coins < item.price:
+            return jsonify({'success': False, 'error': f'Coin yetarli emas! Sizda {current_user.coins} coin bor, kerak: {item.price}'})
+        
+        # Inventarda borligini tekshirish
+        existing_item = Inventory.query.filter_by(
+            user_id=current_user.id, 
+            item_id=item_id
+        ).first()
+        
+        if existing_item:
+            return jsonify({'success': False, 'error': 'Sizda bu mahsulot allaqachon bor!'})
+        
+        # Coinlarni olib tashlash
+        current_user.coins -= item.price
+        
+        # Energiya boost qo'shish
+        new_energy = current_user.energy
+        if item.energy_boost > 0:
+            new_energy = min(100, current_user.energy + item.energy_boost)
+            current_user.energy = new_energy
+        
+        # Inventarga qo'shish
+        new_inventory = Inventory(
+            user_id=current_user.id,
+            item_id=item_id,
+            equipped=False
+        )
+        db.session.add(new_inventory)
+        
+        # Notification yaratish
+        notification = Notification(
+            user_id=current_user.id,
+            title='🛍️ Yangi mahsulot!',
+            message=f'Siz {item.name} ni {item.price} coinga sotib oldingiz!',
+            notification_type='shop',
+            is_read=False
+        )
+        db.session.add(notification)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'{item.name} muvaffaqiyatli sotib olindi!' + 
+                      (f' +{item.energy_boost} energiya' if item.energy_boost > 0 else ''),
+            'new_coins': current_user.coins,
+            'new_energy': current_user.energy
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Xatolik buy_item da: {str(e)}")
+        return jsonify({'success': False, 'error': f'Server xatosi: {str(e)}'})
+
+@app.route('/shop')
+@login_required
+def shop():
+    """Do'kon sahifasi - YANGILANGAN VERSIYA"""
+    try:
+        items = Item.query.filter_by(is_active=True).all()
+        
+        return render_template('shop.html', 
+                             user=current_user, 
+                             items=items)
+    except Exception as e:
+        print(f"Shop route xatosi: {str(e)}")
+        flash('Do\'kon yuklanmadi!', 'error')
+        return redirect(url_for('dashboard'))
+
 
 # ASOSIY ROUTE'LAR
 @app.route('/')
@@ -464,7 +725,6 @@ def login():
                 if last_login_date != today:
                     if (today - last_login_date).days == 1:
                         user.streak += 1
-                        # 7 kunlik streak uchun mukofot
                         if user.streak % 7 == 0:
                             user.coins += 100
                             flash('7 kunlik ketma-ket tizimga kirish uchun 100 coin mukofoti!', 'success')
@@ -526,43 +786,6 @@ def register():
     
     return render_template('register.html')
 
-@app.route('/get_announcements')
-@login_required
-def get_announcements():
-    """E'lonlarni JSON formatida qaytarish"""
-    try:
-        now = datetime.utcnow()
-        active_announcements = Announcement.query.filter(
-            Announcement.is_active == True,
-            Announcement.start_date <= now,
-            Announcement.end_date >= now
-        ).order_by(Announcement.created_at.desc()).all()
-        
-        announcements_data = []
-        for announcement in active_announcements:
-            announcements_data.append({
-                'id': announcement.id,
-                'title': announcement.title,
-                'content': announcement.content,
-                'announcement_type': announcement.announcement_type,
-                'start_date': announcement.start_date.isoformat(),
-                'end_date': announcement.end_date.isoformat()
-            })
-        
-        return jsonify({
-            'success': True,
-            'announcements': announcements_data,
-            'count': len(announcements_data)
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'announcements': []
-        })
-
-# Dashboard route'ni ham yangilaymiz
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -571,28 +794,18 @@ def dashboard():
     if current_user.role == 'adult':
         return redirect(url_for('dashboard_adult'))
     
-    # Kunlik topshiriqlarni yangilash
     reset_daily_tasks(current_user.id)
     
-    # Bugungi kunlik topshiriqlarni olish
     todays_tasks = get_todays_tasks()
     
-    # BARCHA topshiriqlarni olish (faqat faol bo'lganlar)
     all_tasks = Task.query.filter_by(is_active=True).all()
     
-    # Kunlik topshiriqlar
     daily_tasks = [task for task in all_tasks if task.daily_reset]
-    
-    # Doimiy topshiriqlar  
     regular_tasks = [task for task in all_tasks if task.task_type == 'regular']
-    
-    # Test topshiriqlari
     quiz_tasks = [task for task in all_tasks if task.task_type == 'quiz']
     
-    # Yangiliklarni olish
     news_list = News.query.filter_by(status='active').order_by(News.created_at.desc()).limit(3).all()
     
-    # E'lonlarni olish
     now = datetime.utcnow()
     announcements = Announcement.query.filter(
         Announcement.is_active == True,
@@ -600,11 +813,9 @@ def dashboard():
         Announcement.end_date >= now
     ).order_by(Announcement.created_at.desc()).all()
     
-    # Foydalanuvchining bajargan topshiriqlari
     completed_tasks = UserTask.query.filter_by(user_id=current_user.id, completed=True).all()
     completed_task_ids = [ut.task_id for ut in completed_tasks]
     
-    # Kunlik progress
     today = datetime.utcnow().date()
     daily_progress = DailyProgress.query.filter_by(user_id=current_user.id, date=today).first()
     
@@ -618,114 +829,345 @@ def dashboard():
                          regular_tasks=regular_tasks,
                          quiz_tasks=quiz_tasks,
                          all_tasks=all_tasks,
-                         news_list=news_list,           # Yangi qo'shildi
-                         announcements=announcements,   # Yangi qo'shildi
+                         news_list=news_list,
+                         announcements=announcements,
                          items=items, 
                          energy_packs=energy_packs,
                          completed_task_ids=completed_task_ids,
                          daily_progress=daily_progress,
                          now=datetime.utcnow())
-     
-def reset_daily_tasks(user_id):
-    """Kunlik topshiriqlarni yangilash"""
-    today = datetime.utcnow().date()
-    
-    # Kunlik topshiriqlarni olish
-    todays_tasks = get_todays_tasks()
-    if todays_tasks:
-        daily_task_ids = [task.id for task in todays_tasks['daily_tasks']] + [todays_tasks['daily_quiz'].id]
-        
-        for task_id in daily_task_ids:
-            user_task = UserTask.query.filter_by(user_id=user_id, task_id=task_id).first()
-            if user_task:
-                # Agar oxirgi bajarilgan sana bugun bo'lmasa, yangilash
-                if user_task.completed_at and user_task.completed_at.date() != today:
-                    user_task.completed = False
-                    user_task.completed_at = None
-            else:
-                # Yangi user task yaratish
-                new_user_task = UserTask(user_id=user_id, task_id=task_id)
-                db.session.add(new_user_task)
-    
-    db.session.commit()
 
-# YANGI: KUNLIK TEST ROUTE'I
-@app.route('/daily_quiz')
-@login_required
-def daily_quiz():
-    todays_tasks = get_todays_tasks()
-    if todays_tasks and todays_tasks['daily_quiz']:
-        return redirect(url_for('ml_quiz', task_id=todays_tasks['daily_quiz'].id))
-    else:
-        flash('Bugun test mavjud emas!', 'error')
-        return redirect(url_for('dashboard'))
-
-# ML QUIZ ROUTE'LARI - YANGILANGAN
+# QUIZ ROUTE'LARI
 @app.route('/ml_quiz')
 @login_required
 def ml_quiz():
-    """ML Quiz o'yini"""
-    questions_data = load_questions_from_json()
-    questions = questions_data.get('eco_questions', [])
-    random.shuffle(questions)
-    questions = questions[:10]  # 10 ta savol
+    task_id = request.args.get('task_id', type=int)
+    difficulty = request.args.get('difficulty', '')
+    task = None
+    
+    if task_id:
+        task = Task.query.get(task_id)
+        if task:
+            difficulty = task.difficulty
     
     return render_template('ml_quiz.html', 
-                         user=current_user,
-                         questions=questions)
+                         user=current_user, 
+                         task=task, 
+                         difficulty=difficulty)
 
-@app.route('/recycle_game')
+@app.route('/ml/get_questions')
 @login_required
-def recycle_game():
-    """Qayta ishlash o'yini"""
-    return render_template('recycle_game.html', user=current_user)
+def get_questions():
+    try:
+        data = load_questions_from_json()
+        
+        if 'eco_questions' not in data:
+            return jsonify({'success': False, 'error': 'JSON faylda eco_questions topilmadi!'})
+        
+        all_questions = data['eco_questions']
+        
+        if len(all_questions) == 0:
+            return jsonify({'success': False, 'error': 'JSON faylda savollar topilmadi!'})
+        
+        difficulty_filter = request.args.get('difficulty', '').lower()
+        task_id = request.args.get('task_id', type=int)
+        user_level = current_user.level
+        
+        if not difficulty_filter:
+            if user_level <= 3:
+                difficulty_filter = 'easy'
+            elif user_level <= 6:
+                difficulty_filter = 'medium'
+            else:
+                difficulty_filter = 'hard'
+        
+        if task_id:
+            task = Task.query.get(task_id)
+            if task:
+                difficulty_filter = task.difficulty
+        
+        filtered_questions = []
+        
+        if difficulty_filter:
+            difficulty_mapping = {
+                'easy': ['easy', 'oson', 'oddiy'],
+                'medium': ['medium', 'o\'rta', 'ortacha', 'middle'],
+                'hard': ['hard', 'qiyin', 'murakkab', 'difficult']
+            }
+            
+            target_difficulties = difficulty_mapping.get(difficulty_filter, [difficulty_filter])
+            
+            main_questions = [q for q in all_questions if q.get('difficulty', '').lower() in target_difficulties]
+            
+            if len(main_questions) < 5:
+                remaining_needed = 5 - len(main_questions)
+                
+                if difficulty_filter == 'easy':
+                    additional_questions = [q for q in all_questions if q.get('difficulty', '').lower() in difficulty_mapping['medium']]
+                    additional_questions = additional_questions[:remaining_needed]
+                    main_questions.extend(additional_questions)
+                
+                elif difficulty_filter == 'medium':
+                    medium_count = min(4, len(main_questions))
+                    easy_questions = [q for q in all_questions if q.get('difficulty', '').lower() in difficulty_mapping['easy']]
+                    hard_questions = [q for q in all_questions if q.get('difficulty', '').lower() in difficulty_mapping['hard']]
+                    
+                    additional_easy = easy_questions[:1] if easy_questions else []
+                    additional_hard = hard_questions[:1] if hard_questions else []
+                    
+                    main_questions = main_questions[:medium_count]
+                    main_questions.extend(additional_easy)
+                    main_questions.extend(additional_hard)
+                
+                elif difficulty_filter == 'hard':
+                    additional_questions = [q for q in all_questions if q.get('difficulty', '').lower() in difficulty_mapping['medium']]
+                    additional_questions = additional_questions[:remaining_needed]
+                    main_questions.extend(additional_questions)
+            
+            filtered_questions = main_questions
+            
+            if len(filtered_questions) == 0:
+                filtered_questions = all_questions
+        
+        selected_questions = random.sample(filtered_questions, min(5, len(filtered_questions)))
+        
+        return jsonify({
+            'success': True,
+            'questions': selected_questions,
+            'total': len(selected_questions),
+            'difficulty': difficulty_filter,
+            'user_level': user_level,
+            'source': 'ml_questions.json'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Savollarni yuklashda xatolik: {str(e)}'})
 
-@app.route('/energy_game')
+@app.route('/ml/submit_quiz', methods=['POST'])
 @login_required
-def energy_game():
-    """Energiya tejash o'yini"""
-    return render_template('energy_game.html', user=current_user)
+def submit_quiz():
+    try:
+        data = request.get_json()
+        results = data.get('results', [])
+        score = data.get('score', 0)
+        correct_count = data.get('correct_count', 0)
+        total_questions = data.get('total_questions', 0)
+        task_id = data.get('task_id', None)
+        difficulty = data.get('difficulty', 'medium')
+        
+        base_coins = 20
+        base_energy_cost = 15
+        
+        if difficulty == 'easy':
+            coins_earned = base_coins + (correct_count * 2)
+            energy_cost = base_energy_cost
+            exp_gained = correct_count * 5
+        elif difficulty == 'medium':
+            coins_earned = base_coins + (correct_count * 3)
+            energy_cost = base_energy_cost + 5
+            exp_gained = correct_count * 8
+        else:
+            coins_earned = base_coins + (correct_count * 5)
+            energy_cost = base_energy_cost + 10
+            exp_gained = correct_count * 12
+        
+        task = None
+        if task_id:
+            task = Task.query.get(task_id)
+            if task:
+                coins_earned += task.reward_coins
+                if task.difficulty == 'easy':
+                    coins_earned += 10
+                elif task.difficulty == 'medium':
+                    coins_earned += 15
+                elif task.difficulty == 'hard':
+                    coins_earned += 20
+        
+        if current_user.energy < energy_cost:
+            return jsonify({
+                'success': False,
+                'error': f'Energiya yetarli emas! Sizda {current_user.energy} energiya bor, kerak: {energy_cost}'
+            })
+        
+        current_user.coins += coins_earned
+        current_user.energy = max(0, current_user.energy - energy_cost)
+        current_user.experience += exp_gained
+        
+        level_up = check_level_up(current_user)
+        
+        quiz_result = QuizResult(
+            user_id=current_user.id,
+            score=score,
+            correct_answers=correct_count,
+            total_questions=total_questions,
+            coins_earned=coins_earned,
+            task_id=task_id,
+            difficulty=difficulty
+        )
+        
+        db.session.add(quiz_result)
+        
+        today = datetime.utcnow().date()
+        daily_progress = DailyProgress.query.filter_by(user_id=current_user.id, date=today).first()
+        if daily_progress:
+            daily_progress.quizzes_completed += 1
+            daily_progress.coins_earned += coins_earned
+        
+        db.session.commit()
+        
+        message = f'Test muvaffaqiyatli yakunlandi! {correct_count}/{total_questions} savolga to\'g\'ri javob berdingiz. {coins_earned} coin yutib oldingiz!'
+        
+        if level_up:
+            message += f' Tabriklaymiz! Siz {current_user.level}-darajaga ko\'tarildingiz!'
+        
+        if task:
+            message += f' "{task.title}" topshirig\'i uchun test tamomlandi!'
+        
+        return jsonify({
+            'success': True,
+            'score': score,
+            'correct_answers': correct_count,
+            'total_questions': total_questions,
+            'coins_earned': coins_earned,
+            'energy_used': energy_cost,
+            'experience_gained': exp_gained,
+            'new_coins': current_user.coins,
+            'new_energy': current_user.energy,
+            'new_experience': current_user.experience,
+            'new_level': current_user.level,
+            'level_up': level_up,
+            'difficulty': difficulty,
+            'task_completed': bool(task),
+            'message': message
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Natijalarni saqlashda xatolik: {str(e)}'})
 
-@app.route('/suv_tejash')
+# QOLGAN ROUTE'LAR
+@app.route('/start_task_quiz/<int:task_id>')
 @login_required
-def suv_tejash():
-    """Suv tejash o'yini"""
-    return render_template('suv_tejash.html', user=current_user)
+def start_task_quiz(task_id):
+    if current_user.role != 'child':
+        flash('Faqat bolalar uchun!', 'error')
+        return redirect(url_for('dashboard'))
+    
+    task = Task.query.get_or_404(task_id)
+    
+    if current_user.energy < task.energy_cost:
+        flash(f'Energiya yetarli emas! Sizda {current_user.energy} energiya bor, kerak: {task.energy_cost}', 'error')
+        return redirect(url_for('dashboard'))
+    
+    return redirect(url_for('ml_quiz', task_id=task_id))
 
-@app.route('/virtual_daraxtekish')
-@login_required
-def virtual_daraxtekish():
-    """Virtual daraxt ekish o'yini"""
-    return render_template('virtual_daraxtekish.html', user=current_user)
-
-@app.route('/eco_puzzle')
-@login_required
-def eco_puzzle():
-    """Ekologik puzzle o'yini"""
-    return render_template('eco_puzzle.html', user=current_user)
+# app.py ga quyidagi hero route'ini qo'shing yoki yangilang
 
 @app.route('/hero')
 @login_required
 def hero():
-    """Foydalanuvchining achievements va statistics sahifasi"""
-    total_tasks_completed = UserTask.query.filter_by(user_id=current_user.id, completed=True).count()
-    total_quizzes = QuizResult.query.filter_by(user_id=current_user.id).count()
-    total_coins_earned = db.session.query(func.sum(QuizResult.coins_earned)).filter_by(user_id=current_user.id).scalar() or 0
-    
-    hero_stats = {
-        'level': current_user.level,
-        'experience': current_user.experience,
-        'coins': current_user.coins,
-        'streak': current_user.streak,
-        'total_coins_earned': total_coins_earned,
-        'total_tasks_completed': total_tasks_completed,
-        'total_quizzes': total_quizzes
-    }
-    
-    return render_template('hero.html', 
-                         user=current_user, 
-                         hero_stats=hero_stats)
+    """Hero sahifasi - YANGILANGAN VERSIYA"""
+    try:
+        # Foydalanuvchining inventaridagi barcha elementlar
+        inventory_items = Inventory.query.filter_by(user_id=current_user.id).all()
+        
+        # Kiyilgan elementlar
+        equipped_items = [item for item in inventory_items if item.equipped]
+        
+        # Turlarga qarab guruhlash
+        clothes_items = [item for item in inventory_items if item.item.item_type == 'clothes']
+        hat_items = [item for item in inventory_items if item.item.item_type == 'hat']
+        shoe_items = [item for item in inventory_items if item.item.item_type == 'shoes']
+        accessory_items = [item for item in inventory_items if item.item.item_type == 'accessory']
+        
+        # Kiyilgan elementlarni alohida guruhlash
+        equipped_clothes = [item for item in clothes_items if item.equipped]
+        equipped_hat = [item for item in hat_items if item.equipped]
+        equipped_shoes = [item for item in shoe_items if item.equipped]
+        equipped_accessory = [item for item in accessory_items if item.equipped]
+        
+        # Statistikalar
+        user_tasks_completed = UserTask.query.filter_by(user_id=current_user.id, completed=True).count()
+        quiz_results_count = QuizResult.query.filter_by(user_id=current_user.id).count()
+        total_coins_earned = db.session.query(func.sum(QuizResult.coins_earned)).filter_by(user_id=current_user.id).scalar() or 0
+        
+        return render_template('hero.html', 
+                             user=current_user,
+                             inventory_items=inventory_items,
+                             equipped_items=equipped_items,
+                             clothes_items=clothes_items,
+                             hat_items=hat_items,
+                             shoe_items=shoe_items,
+                             accessory_items=accessory_items,
+                             equipped_clothes=equipped_clothes,
+                             equipped_hat=equipped_hat,
+                             equipped_shoes=equipped_shoes,
+                             equipped_accessory=equipped_accessory,
+                             user_tasks_completed=user_tasks_completed,
+                             quiz_results_count=quiz_results_count,
+                             total_coins_earned=total_coins_earned)
+        
+    except Exception as e:
+        print(f"Hero route xatosi: {str(e)}")
+        flash('Hero sahifasi yuklanmadi!', 'error')
+        return redirect(url_for('dashboard'))
 
+@app.route('/equip_item/<int:item_id>', methods=['POST'])
+@login_required
+def equip_item(item_id):
+    """Elementni kiyish"""
+    try:
+        inventory_item = Inventory.query.filter_by(user_id=current_user.id, id=item_id).first()
+        
+        if not inventory_item:
+            return jsonify({'success': False, 'error': 'Element topilmadi!'})
+        
+        item_type = inventory_item.item.item_type
+        
+        # Bir xil turdagi boshqa elementlarni echish
+        same_type_items = Inventory.query.filter_by(user_id=current_user.id, equipped=True).join(Item).filter(Item.item_type == item_type).all()
+        for item in same_type_items:
+            item.equipped = False
+        
+        # Yangi elementni kiyish
+        inventory_item.equipped = True
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'{inventory_item.item.name} muvaffaqiyatli kiyildi!'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': f'Xatolik: {str(e)}'})
+
+@app.route('/unequip_item/<int:item_id>', methods=['POST'])
+@login_required
+def unequip_item(item_id):
+    """Elementni echish"""
+    try:
+        inventory_item = Inventory.query.filter_by(user_id=current_user.id, id=item_id).first()
+        
+        if not inventory_item:
+            return jsonify({'success': False, 'error': 'Element topilmadi!'})
+        
+        if not inventory_item.equipped:
+            return jsonify({'success': False, 'error': 'Bu element kiyilmagan!'})
+        
+        # Elementni echish
+        inventory_item.equipped = False
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'{inventory_item.item.name} muvaffaqiyatli echildi!'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': f'Xatolik: {str(e)}'})
+
+# ADMIN ROUTE'LARI
 @app.route('/admin/dashboard')
 @login_required
 def admin_dashboard():
@@ -742,7 +1184,6 @@ def admin_dashboard():
     recent_users = User.query.order_by(User.created_at.desc()).limit(5).all()
     recent_posts = News.query.order_by(News.created_at.desc()).limit(5).all()
     
-    # Kunlik statistikalar
     today = datetime.utcnow().date()
     daily_progress_today = DailyProgress.query.filter_by(date=today).all()
     total_tasks_today = sum(dp.tasks_completed for dp in daily_progress_today)
@@ -822,7 +1263,6 @@ def admin_announcements():
     announcements = Announcement.query.order_by(Announcement.created_at.desc()).all()
     now = datetime.utcnow()
     
-    # Statistikalar
     active_announcements_count = Announcement.query.filter(
         Announcement.start_date <= now,
         Announcement.end_date >= now,
@@ -959,9 +1399,7 @@ def delete_task(task_id):
     
     task = Task.query.get(task_id)
     if task:
-        # Bog'liq UserTask'larni o'chirish
         UserTask.query.filter_by(task_id=task_id).delete()
-        # Bog'liq QuizResult'larni o'chirish
         QuizResult.query.filter_by(task_id=task_id).delete()
         db.session.delete(task)
         db.session.commit()
@@ -1037,128 +1475,174 @@ def add_news():
 @login_required
 def add_announcement():
     if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    try:
+        data = request.get_json()
+        
+        start_date = datetime.fromisoformat(data.get('start_date').replace('Z', '+00:00'))
+        end_date = datetime.fromisoformat(data.get('end_date').replace('Z', '+00:00'))
+        
+        new_announcement = Announcement(
+            title=data.get('title'),
+            content=data.get('content'),
+            announcement_type=data.get('announcement_type', 'info'),
+            start_date=start_date,
+            end_date=end_date,
+            author_id=current_user.id
+        )
+        db.session.add(new_announcement)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'E\'lon muvaffaqiyatli qo\'shildi', 'announcement_id': new_announcement.id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/admin/delete_news/<int:news_id>', methods=['POST'])
+@login_required
+def delete_news(news_id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    news = News.query.get(news_id)
+    if news:
+        db.session.delete(news)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Yangilik muvaffaqiyatli o\'chirildi'})
+    
+    return jsonify({'success': False, 'error': 'Yangilik topilmadi'})
+
+@app.route('/admin/delete_announcement/<int:announcement_id>', methods=['POST'])
+@login_required
+def delete_announcement(announcement_id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    announcement = Announcement.query.get(announcement_id)
+    if announcement:
+        db.session.delete(announcement)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'E\'lon muvaffaqiyatli o\'chirildi'})
+    
+    return jsonify({'success': False, 'error': 'E\'lon topilmadi'})
+
+@app.route('/admin/toggle_news/<int:news_id>', methods=['POST'])
+@login_required
+def toggle_news(news_id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    news = News.query.get(news_id)
+    if news:
+        news.status = 'archived' if news.status == 'active' else 'active'
+        db.session.commit()
+        status = "faol" if news.status == 'active' else "arxiv"
+        return jsonify({'success': True, 'message': f'Yangilik {status} holatga o\'zgartirildi', 'status': news.status})
+    
+    return jsonify({'success': False, 'error': 'Yangilik topilmadi'})
+
+@app.route('/admin/toggle_announcement/<int:announcement_id>', methods=['POST'])
+@login_required
+def toggle_announcement(announcement_id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    announcement = Announcement.query.get(announcement_id)
+    if announcement:
+        announcement.is_active = not announcement.is_active
+        db.session.commit()
+        status = "faol" if announcement.is_active else "nofaol"
+        return jsonify({'success': True, 'message': f'E\'lon {status} holatga o\'zgartirildi', 'is_active': announcement.is_active})
+    
+    return jsonify({'success': False, 'error': 'E\'lon topilmadi'})
+
+@app.route('/admin/get_news/<int:news_id>')
+@login_required
+def get_news(news_id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    news = News.query.get(news_id)
+    if news:
+        return jsonify({
+            'success': True,
+            'news': {
+                'id': news.id,
+                'title': news.title,
+                'content': news.content,
+                'category': news.category,
+                'image_path': news.image_path,
+                'status': news.status
+            }
+        })
+    return jsonify({'success': False, 'error': 'Yangilik topilmadi'})
+
+@app.route('/admin/get_announcement/<int:announcement_id>')
+@login_required
+def get_announcement(announcement_id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    announcement = Announcement.query.get(announcement_id)
+    if announcement:
+        return jsonify({
+            'success': True,
+            'announcement': {
+                'id': announcement.id,
+                'title': announcement.title,
+                'content': announcement.content,
+                'announcement_type': announcement.announcement_type,
+                'start_date': announcement.start_date.isoformat(),
+                'end_date': announcement.end_date.isoformat(),
+                'is_active': announcement.is_active
+            }
+        })
+    return jsonify({'success': False, 'error': 'E\'lon topilmadi'})
+
+@app.route('/admin/update_news/<int:news_id>', methods=['POST'])
+@login_required
+def update_news(news_id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    try:
+        news = News.query.get_or_404(news_id)
+        data = request.get_json()
+        
+        news.title = data.get('title', news.title)
+        news.content = data.get('content', news.content)
+        news.category = data.get('category', news.category)
+        news.image_path = data.get('image_path', news.image_path)
+        news.status = data.get('status', news.status)
+        news.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Yangilik muvaffaqiyatli yangilandi'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/admin/update_announcement/<int:announcement_id>', methods=['POST'])
+@login_required
+def update_announcement(announcement_id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
+    
+    try:
+        announcement = Announcement.query.get_or_404(announcement_id)
+        data = request.get_json()
+        
+        announcement.title = data.get('title', announcement.title)
+        announcement.content = data.get('content', announcement.content)
+        announcement.announcement_type = data.get('announcement_type', announcement.announcement_type)
+        announcement.start_date = datetime.fromisoformat(data.get('start_date').replace('Z', '+00:00'))
+        announcement.end_date = datetime.fromisoformat(data.get('end_date').replace('Z', '+00:00'))
+        announcement.is_active = data.get('is_active', announcement.is_active)
+        
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'E\'lon muvaffaqiyatli yangilandi'})
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
 # DO'KON ADMIN FUNKSIYALARI
-
-
-@app.route('/start_task_quiz/<int:task_id>')
-@login_required
-def start_task_quiz(task_id):
-    """Topshiriq uchun test boshlash"""
-    task = Task.query.get_or_404(task_id)
-    
-    # Energiya tekshirish
-    if current_user.energy < task.energy_cost:
-        flash(f'Energiya yetarli emas! Kerak: {task.energy_cost}, Sizda: {current_user.energy}', 'error')
-        return redirect(url_for('dashboard'))
-    
-    # Energiya kamaytirish
-    current_user.energy -= task.energy_cost
-    db.session.commit()
-    
-    # Test savollari yuklanish (demo savollari yoki JSON dan)
-    questions_data = load_questions_from_json()
-    questions = questions_data.get('eco_questions', [])
-    
-    # Task darajasiga qarab savol filtrlarini qilish
-    difficulty_map = {
-        'easy': 'easy',
-        'medium': 'medium',
-        'hard': 'hard'
-    }
-    
-    filtered_questions = [q for q in questions if q.get('difficulty') == difficulty_map.get(task.difficulty, 'easy')]
-    
-    # Agar filtrlanganlar kam bo'lsa, hammani olish
-    if len(filtered_questions) < 5:
-        filtered_questions = questions[:5]
-    else:
-        filtered_questions = random.sample(filtered_questions, min(5, len(filtered_questions)))
-    
-    return render_template('quiz.html',
-                         user=current_user,
-                         task=task,
-                         questions=filtered_questions,
-                         task_id=task_id)
-
-@app.route('/submit_quiz', methods=['POST'])
-@login_required
-def submit_quiz():
-    """Test natijalarini saqlash"""
-    try:
-        data = request.get_json()
-        results = data.get('results', [])
-        score = data.get('score', 0)
-        correct_count = data.get('correct_count', 0)
-        total_questions = data.get('total_questions', 0)
-        task_id = data.get('task_id')
-        
-        task = Task.query.get(task_id) if task_id else None
-        
-        # Darajaga qarab mukofotlarni hisoblash
-        base_coins = 20
-        if task:
-            if task.difficulty == 'easy':
-                coins_earned = base_coins + (correct_count * 2)
-                exp_gained = correct_count * 5
-            elif task.difficulty == 'medium':
-                coins_earned = base_coins + (correct_count * 3) + task.reward_coins
-                exp_gained = correct_count * 8
-            else:  # hard
-                coins_earned = base_coins + (correct_count * 5) + task.reward_coins
-                exp_gained = correct_count * 12
-        else:
-            coins_earned = base_coins + (correct_count * 3)
-            exp_gained = correct_count * 8
-        
-        # Mukofotlarni berish
-        current_user.coins += coins_earned
-        current_user.experience += exp_gained
-        
-        # Quiz resulti saqlash
-        quiz_result = QuizResult(
-            user_id=current_user.id,
-            score=score,
-            correct_answers=correct_count,
-            total_questions=total_questions,
-            coins_earned=coins_earned,
-            task_id=task_id
-        )
-        db.session.add(quiz_result)
-        
-        # Topshiriqni bajarilgan deb belgilash
-        if task_id:
-            user_task = UserTask.query.filter_by(user_id=current_user.id, task_id=task_id).first()
-            if user_task:
-                user_task.completed = True
-                user_task.completed_at = datetime.utcnow()
-        
-        # Kunlik progressni yangilash
-        today = datetime.utcnow().date()
-        daily_progress = DailyProgress.query.filter_by(user_id=current_user.id, date=today).first()
-        if daily_progress:
-            daily_progress.quizzes_completed += 1
-            daily_progress.coins_earned += coins_earned
-        
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'score': score,
-            'correct_answers': correct_count,
-            'total_questions': total_questions,
-            'coins_earned': coins_earned,
-            'experience_gained': exp_gained,
-            'new_coins': current_user.coins,
-            'new_experience': current_user.experience,
-            'message': f'Test topshirildi! +{coins_earned} coin, +{exp_gained} tajriba'
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'error': f'Xatolik: {str(e)}'})
-
 @app.route('/admin/add_item', methods=['POST'])
 @login_required
 def add_item():
@@ -1211,7 +1695,6 @@ def delete_item(item_id):
     
     item = Item.query.get(item_id)
     if item:
-        # Bog'liq inventar elementlarini o'chirish
         Inventory.query.filter_by(item_id=item_id).delete()
         db.session.delete(item)
         db.session.commit()
@@ -1250,24 +1733,19 @@ def games():
 @app.route('/news')
 @login_required
 def news():
-    # Yangiliklarni bazadan olish
     news_list = News.query.filter_by(status='active').order_by(News.created_at.desc()).all()
-    
-    # E'lonlarni bazadan olish - faqat faol va hozirgi vaqtda amal qiladiganlar
     now = datetime.utcnow()
     active_announcements = Announcement.query.filter(
-        Announcement.is_active == True,
         Announcement.start_date <= now,
-        Announcement.end_date >= now
+        Announcement.end_date >= now,
+        Announcement.is_active == True
     ).order_by(Announcement.created_at.desc()).all()
-    
-    print(f"📢 E'lonlar soni: {len(active_announcements)}")  # Debug uchun
     
     return render_template('news.html', 
                          user=current_user, 
                          news_list=news_list, 
                          announcements=active_announcements)
-    
+
 @app.route('/news/<int:news_id>')
 @login_required
 def news_detail(news_id):
@@ -1300,12 +1778,7 @@ def missions():
 def stories():
     return render_template('stories.html', user=current_user)
 
-@app.route('/shop')
-@login_required
-def shop():
-    items = Item.query.filter_by(is_active=True).all()
-    energy_packs = EnergyPack.query.filter_by(is_active=True).all()
-    return render_template('shop.html', user=current_user, items=items, energy_packs=energy_packs)
+
 
 @app.route('/profile')
 @login_required
@@ -1403,108 +1876,6 @@ def get_daily_progress():
             'quizzes_completed': 0,
             'coins_earned': 0
         })
-
-
-# NOTIFICATION VA COIN BOSHQARUV API'LARI
-@app.route('/admin/add_coins_to_user/<int:user_id>', methods=['POST'])
-@login_required
-def add_coins_to_user(user_id):
-    if not current_user.is_admin:
-        return jsonify({'success': False, 'error': 'Admin huquqi yo\'q'})
-    
-    try:
-        data = request.get_json()
-        coins_amount = data.get('coins', 0)
-        reason = data.get('reason', 'Admin tomonidan qo\'shildi')
-        
-        if coins_amount <= 0 or coins_amount > 10000:
-            return jsonify({'success': False, 'error': 'Coin miqdori 1 dan 10000 gacha bo\'lishi kerak'})
-        
-        user = User.query.get_or_404(user_id)
-        user.coins += coins_amount
-        
-        # Notification yaratish
-        notification = Notification(
-            user_id=user_id,
-            title='💰 Coin olindi!',
-            message=f'Sizga {coins_amount} coin qo\'shildi! Sabab: {reason}',
-            notification_type='coin',
-            is_read=False
-        )
-        db.session.add(notification)
-        db.session.commit()
-        
-        return jsonify({
-            'success': True, 
-            'message': f'{user.username}ga {coins_amount} coin qo\'shildi',
-            'new_balance': user.coins
-        })
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/get_notifications')
-@login_required
-def get_notifications():
-    try:
-        notifications = Notification.query.filter_by(
-            user_id=current_user.id,
-            is_read=False
-        ).order_by(Notification.created_at.desc()).limit(10).all()
-        
-        return jsonify({
-            'success': True,
-            'notifications': [{
-                'id': n.id,
-                'title': n.title,
-                'message': n.message,
-                'type': n.notification_type,
-                'created_at': n.created_at.isoformat()
-            } for n in notifications]
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/mark_notification_read/<int:notification_id>', methods=['POST'])
-@login_required
-def mark_notification_read(notification_id):
-    try:
-        notification = Notification.query.get_or_404(notification_id)
-        if notification.user_id == current_user.id:
-            notification.is_read = True
-            db.session.commit()
-            return jsonify({'success': True})
-        return jsonify({'success': False, 'error': 'Ruxsat berilmagan'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-
-def init_database():
-    with app.app_context():
-        try:
-            # db.drop_all()  <-- O'chirib tashlandi, ma'lumotlar saqlanib qolishi uchun
-            db.create_all()
-            
-            # Agar admin foydalanuvchi bo'lmasa, demo ma'lumotlarni yaratish
-            if not User.query.filter_by(username='admin').first():
-                create_demo_data()
-                print("✅ Demo ma'lumotlar yaratildi!")
-            else:
-                print("ℹ️ Ma'lumotlar bazasi mavjud.")
-            
-            # Kunlik vazifalarni yaratish - APP CONTEXT ICHIDA
-            create_daily_tasks()
-            
-        except Exception as e:
-            print(f"❌ Database yangilashda xatolik: {e}")
-            # Xatolik bo'lsa ham ishlashda davom etish
-            try:
-                db.create_all()
-                if not User.query.filter_by(username='admin').first():
-                    create_demo_data()
-                create_daily_tasks()
-            except Exception as e2:
-                print(f"❌ Qayta urinishda xatolik: {e2}")
 
 if __name__ == '__main__':
     init_database()
